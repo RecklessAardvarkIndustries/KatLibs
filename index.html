@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mad Libs Comic Creator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Handwriting Font: Kalam -->
+    <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom styles for a notepad look */
+        body {
+            background-color: #e0e0e0; /* Gray background behind the notebook */
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+        }
+        .app-container {
+            max-width: 600px; /* Wider to look like a notepad */
+            width: 95%;
+            background-color: #fff;
+            /* Faux spiral binding shadow */
+            box-shadow: 10px 10px 30px rgba(0, 0, 0, 0.2), -5px 0 0 rgba(192, 192, 192, 0.5); 
+            border-radius: 8px;
+            min-height: 800px;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease-in-out;
+        }
+        
+        /* Notebook Paper Effect */
+        .notepad-paper {
+            background-color: #fff;
+            /* Repeating light blue lines */
+            background-image: repeating-linear-gradient(#f0f0f0 0, #f0f0f0 1px, #fff 1px, #fff 24px); 
+            background-size: 100% 25px;
+            padding: 20px 30px 20px 50px; /* Left padding for the red line */
+            border-left: 2px solid #ef4444; /* Red margin line */
+            font-family: 'Kalam', cursive; /* Handwriting font */
+            min-height: 100%;
+        }
+
+        /* Enforce Handwriting Font for all text elements */
+        h1, h2, p, button, input, label, span {
+            font-family: 'Kalam', cursive !important;
+            font-weight: 700; /* Bolder pen look */
+        }
+        
+        /* Input styling to look less polished */
+        input {
+            border: 2px solid #6d28d9 !important; /* Thicker "pen" border */
+            border-radius: 4px !important;
+            box-shadow: none !important;
+            background-color: rgba(255, 255, 255, 0.8) !important;
+            font-weight: 400 !important; /* Slightly lighter input text */
+        }
+        
+        /* Button styling for a doodled/drawn look */
+        .app-button {
+            border: 3px solid #000;
+            border-radius: 12px;
+            box-shadow: 4px 4px 0 #000; /* Hand-drawn shadow effect */
+        }
+        .app-button:hover {
+            box-shadow: 2px 2px 0 #000;
+            transform: scale(1.01);
+        }
+        .app-button:active {
+            box-shadow: 0 0 0 #000;
+            transform: scale(0.98);
+        }
+
+        /* Comic Panel Styling Update for paper look */
+        .comic-panel {
+            box-shadow: none;
+            border: 5px solid #000; /* Thick, drawn border */
+            border-radius: 10px;
+        }
+        .caption-block {
+            background-color: #fff; /* White background for the text block */
+            border-top: 3px solid #000; /* Black pen line */
+            padding: 1rem;
+            color: #1f2937;
+        }
+        /* Custom scrollbar for better look */
+        .scroll-area::-webkit-scrollbar {
+            width: 6px;
+        }
+        .scroll-area::-webkit-scrollbar-thumb {
+            background-color: #6d28d9;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app" class="app-container">
+    <!-- Content will be rendered here -->
+</div>
+
+<script type="module">
+    // --- Firebase Setup (REQUIRED for Canvas Environment) ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+    let app, db, auth;
+    let userId = null;
+
+    try {
+        app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        auth = getAuth(app);
+    } catch (e) {
+        console.error("Firebase initialization failed:", e);
+    }
+
+    async function initializeAuth() {
+        try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                const userCredential = await signInWithCustomToken(auth, __initial_auth_token);
+                userId = userCredential.user.uid;
+            } else {
+                const userCredential = await signInAnonymously(auth);
+                userId = userCredential.user.uid;
+            }
+        } catch (error) {
+            console.error("Authentication failed, falling back to anonymous user ID:", error);
+            userId = crypto.randomUUID();
+        }
+    }
+    
+    // Set up Tailwind configuration
+    tailwind.config = {
+        theme: {
+            extend: {
+                fontFamily: {
+                    sans: ['Kalam', 'cursive'],
+                },
+            }
+        }
+    }
+
+    const appElement = document.getElementById('app');
+
+    // --- Application State ---
+    let state = {
+        currentPage: 'input', // 'input', 'loading', or 'story'
+        userWords: {},
+        storySegments: [], // [{text: '...', imageUrl: null, status: 'pending'}]
+        isGenerating: false,
+    };
+
+    // --- Dynamic Mad Libs Data (20 THEMES) ---
+    const storyConfigurations = [
+        // --- 1. Space Pirate Adventure (Original) ---
+        {
+            title: "Space Pirate Adventure",
+            theme: "Space pirates, futuristic, high-contrast digital art comic book style",
+            template: "Captain {NAME_1} and their {ADJECTIVE_1} ship, the Kugelblitz-{NUMBER_1}, launched from Planet {PLANET_1}. ||| Their mission was to {VERB_1} the dreaded {NOUN_1} guarded by {PLURAL_NOUN_1}. ||| Suddenly, a wild, {ADJECTIVE_2} {CREATURE_1} appeared, which {VERB_PAST_TENSE_1} {ADVERB_1} across the bow. ||| The captain quickly devised an {ADJECTIVE_3} plan to escape and return home {ADJECTIVE_4}.",
+            wordInputs: [
+                { key: 'NUMBER_1', label: 'Number (e.g., 3042)' },
+                { key: 'NAME_1', label: 'Name (e.g., Zorp)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., rusty)' },
+                { key: 'NOUN_1', label: 'Singular Noun (e.g., laser-catapult)' },
+                { key: 'PLANET_1', label: 'Planet (e.g., Saturn)' },
+                { key: 'VERB_1', label: 'Verb (e.g., hijack)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., donuts)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., malicious)' },
+                { key: 'CREATURE_1', label: 'Creature (e.g., space-worm)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., violently)' },
+                { key: 'VERB_PAST_TENSE_1', label: 'Verb (Past Tense, e.g., ran)' },
+                { key: 'ADJECTIVE_3', label: 'Adjective (e.g., heroic)' },
+                { key: 'ADJECTIVE_4', label: 'Final Adjective (e.g., exhausted)' },
+            ],
+        },
+        // --- 2. Mystical Forest Incident (Original) ---
+        {
+            title: "Mystical Forest Incident",
+            theme: "Fantasy, watercolor storybook illustration, medieval comic style",
+            template: "The {ADJECTIVE_1} wizard was trekking through the deep woods when they saw a majestic {CREATURE_1} {ADVERB_1} soaring overhead. ||| The wizard immediately dropped their valuable {NOUN_1} which made a loud {SOUND_1}! ||| They then had to {VERB_1} a giant {NOUN_2} covered in the smell of {SMELL_1} to retrieve it. ||| Finally safe in their {PLACE_1}, they decided to {VERB_2} and practice their {PLURAL_NOUN_1}.",
+            wordInputs: [
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., grumpy)' },
+                { key: 'CREATURE_1', label: 'Mythical Creature (e.g., griffin)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., silently)' },
+                { key: 'SOUND_1', label: 'Type of Sound (e.g., loud whoop)' },
+                { key: 'NOUN_1', label: 'Singular Noun (e.g., ancient scroll)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., spells)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., jealous)' },
+                { key: 'VERB_1', label: 'Verb (e.g., climb over)' },
+                { key: 'NOUN_2', label: 'Large Object (e.g., boulder)' },
+                { key: 'SMELL_1', label: 'A Type of Smell (e.g., burnt socks)' },
+                { key: 'PLACE_1', label: 'A Relaxing Place (e.g., cozy den)' },
+                { key: 'VERB_2', label: 'Verb (e.g., sleep)' },
+            ],
+        },
+        // --- 3. Zombie Apocalypse Survival ---
+        {
+            title: "Zombie Apocalypse Survival",
+            theme: "Horror, gritty black and white graphic novel style, apocalyptic setting",
+            template: "It was a {ADJECTIVE_1} day when the first {PLURAL_NOUN_1} started to {VERB_1}. ||| I quickly grabbed my trusty {NOUN_1} and ran {ADVERB_1} toward the abandoned {BUILDING_1}. ||| Inside, I met a {ADJECTIVE_2} survivor named {NAME_1} who was eating a {FOOD_1}. ||| We decided to {VERB_2} to safety on a {COLOR_1} {VEHICLE_1}.",
+            wordInputs: [
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., terrifying)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., teachers)' },
+                { key: 'VERB_1', label: 'Verb (e.g., twitch)' },
+                { key: 'NOUN_1', label: 'Weapon/Object (e.g., spatula)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., bravely)' },
+                { key: 'BUILDING_1', label: 'Building (e.g., gas station)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., sleepy)' },
+                { key: 'NAME_1', label: 'Name (e.g., Gertrude)' },
+                { key: 'FOOD_1', label: 'Food Item (e.g., pizza roll)' },
+                { key: 'VERB_2', label: 'Verb (e.g., skip)' },
+                { key: 'COLOR_1', label: 'Color (e.g., pink)' },
+                { key: 'VEHICLE_1', label: 'Vehicle (e.g., go-kart)' },
+            ],
+        },
+        // --- 4. Ancient Egyptian Discovery ---
+        {
+            title: "Ancient Egyptian Discovery",
+            theme: "Historical, hieroglyphic and sepia-toned comic style, pyramids and desert",
+            template: "The renowned archaeologist Dr. {NAME_1} found a {ADJECTIVE_1} secret entrance to the tomb of King {PHARAOH_1}. ||| Inside, the team had to {VERB_1} past a giant {ANIMAL_1} that was {ADVERB_1} guarding a pile of {NOUN_1}. ||| They encountered a {ADJECTIVE_2} trap, which required them to sing a {SONG_TYPE_1} song while holding {PLURAL_NOUN_1}. ||| After escaping, they flew back on a private jet carrying a {TREASURE_1} to the city of {CITY_1}.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Indiana)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., muddy)' },
+                { key: 'PHARAOH_1', label: 'Pharaoh Name (e.g., Tutu)' },
+                { key: 'VERB_1', label: 'Verb (e.g., tiptoe)' },
+                { key: 'ANIMAL_1', label: 'Animal (e.g., hippo)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., angrily)' },
+                { key: 'NOUN_1', label: 'Object (e.g., cursed shoe)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., invisible)' },
+                { key: 'SONG_TYPE_1', label: 'Type of Song (e.g., polka)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., rubber ducks)' },
+                { key: 'TREASURE_1', label: 'Treasure (e.g., golden spoon)' },
+                { key: 'CITY_1', label: 'City (e.g., Tokyo)' },
+            ],
+        },
+        // --- 5. High School Dance Disaster ---
+        {
+            title: "High School Dance Disaster",
+            theme: "Teen comedy, vibrant colors, exaggerated expressions, manga-style comic",
+            template: "{NAME_1} was wearing their {ADJECTIVE_1} outfit to the Spring Fling dance at {SCHOOL_1} High. ||| They decided to {VERB_1} {ADVERB_1} across the dance floor when they tripped over a pile of {PLURAL_NOUN_1}. ||| The principal, Mr. {TEACHER_NAME_1}, was so {ADJECTIVE_2} that he started to {VERB_2} with a {NOUN_1}. ||| Everyone agreed it was the most {ADJECTIVE_3} dance in the history of {COLOR_1} events.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Chad)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., neon)' },
+                { key: 'SCHOOL_1', label: 'School Name (e.g., Grizzly)' },
+                { key: 'VERB_1', label: 'Verb (e.g., wiggle)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., passionately)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., staplers)' },
+                { key: 'TEACHER_NAME_1', label: 'Teacher Name (e.g., Jenkins)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., terrified)' },
+                { key: 'VERB_2', label: 'Verb (e.g., juggle)' },
+                { key: 'NOUN_1', label: 'Object (e.g., bowling pin)' },
+                { key: 'ADJECTIVE_3', label: 'Adjective (e.g., memorable)' },
+                { key: 'COLOR_1', label: 'Color (e.g., beige)' },
+            ],
+        },
+        // --- 6. Superhero Origin Story ---
+        {
+            title: "Superhero Origin Story",
+            theme: "Superhero, bold lines, primary colors, classic comic book cover style",
+            template: "Young {NAME_1}, a student at {SCHOOL_1} Elementary, was secretly a {ADJECTIVE_1} genius. ||| One afternoon, they were bitten by a radioactive {ANIMAL_1} while trying to {VERB_1} a {NOUN_1}. ||| This gave them the power to {VERB_2} {ADVERB_1} and shoot {PLURAL_NOUN_1} from their hands. ||| They became the masked vigilante, 'The {ADJECTIVE_2} {SUPERHERO_NAME_1}', ready to save the city of {CITY_1}.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Peter)' },
+                { key: 'SCHOOL_1', label: 'School Name (e.g., Midtown)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., humble)' },
+                { key: 'ANIMAL_1', label: 'Animal (e.g., platypus)' },
+                { key: 'VERB_1', label: 'Verb (e.g., microwave)' },
+                { key: 'NOUN_1', label: 'Object (e.g., refrigerator)' },
+                { key: 'VERB_2', label: 'Verb (e.g., teleport)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., loudly)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., pineapples)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., mighty)' },
+                { key: 'SUPERHERO_NAME_1', label: 'Funny Name (e.g., Spooner)' },
+                { key: 'CITY_1', label: 'City (e.g., Gotham)' },
+            ],
+        },
+        // --- 7. Deep Sea Exploration ---
+        {
+            title: "Deep Sea Exploration",
+            theme: "Nautical, realistic yet stylized deep-sea illustration, dark blue and green palette",
+            template: "Dr. {NAME_1} and his crew sailed the {ADJECTIVE_1} submarine into the {NUMBER_1} fathoms of the {OCEAN_1} Trench. ||| They were searching for the mythical city of {CITY_1} and spotted a creature with {ADJECTIVE_2} scales and {PLURAL_NOUN_1}. ||| Suddenly, the sub began to {VERB_1} {ADVERB_1} as a giant {SEA_CREATURE_1} tried to {VERB_2} their {NOUN_1}. ||| They quickly rose to the surface, bringing back only a {TRINKET_1} and a strange smell of {SMELL_1}.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Jacques)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., leaking)' },
+                { key: 'NUMBER_1', label: 'Number (e.g., 9000)' },
+                { key: 'OCEAN_1', label: 'Ocean Name (e.g., Atlantic)' },
+                { key: 'CITY_1', label: 'City (e.g., Atlantis)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., slimy)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., antennas)' },
+                { key: 'VERB_1', label: 'Verb (e.g., vibrate)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., quickly)' },
+                { key: 'SEA_CREATURE_1', label: 'Sea Creature (e.g., kraken)' },
+                { key: 'VERB_2', label: 'Verb (e.g., tickle)' },
+                { key: 'NOUN_1', label: 'Object (e.g., rudder)' },
+                { key: 'TRINKET_1', label: 'Trinket (e.g., shell)' },
+                { key: 'SMELL_1', label: 'Smell (e.g., old socks)' },
+            ],
+        },
+        // --- 8. Mad Scientist Lab Break-in ---
+        {
+            title: "Mad Scientist Lab Break-in",
+            theme: "Sci-Fi horror, neon green and purple tones, Frankenstein-style illustration",
+            template: "Two {ADJECTIVE_1} friends, {NAME_1} and {NAME_2}, decided to break into the lab of Dr. {SCIENTIST_1}. ||| The lab was filled with {ADJECTIVE_2} bubbling liquids and jars of pickled {PLURAL_NOUN_1}. ||| As they tried to {VERB_1} the master computer, a large {NOUN_1} started to {VERB_2} {ADVERB_1}. ||| They narrowly escaped, leaving behind only a {ADJECTIVE_3} note written on a {COLOR_1} {OBJECT_1}.",
+            wordInputs: [
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., sneaky)' },
+                { key: 'NAME_1', label: 'Name (e.g., Bob)' },
+                { key: 'NAME_2', label: 'Name (e.g., Carol)' },
+                { key: 'SCIENTIST_1', label: 'Scientist Name (e.g., Von Doom)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., sticky)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., eyeballs)' },
+                { key: 'VERB_1', label: 'Verb (e.g., hug)' },
+                { key: 'NOUN_1', label: 'Machine/Object (e.g., robot arm)' },
+                { key: 'VERB_2', label: 'Verb (e.g., scream)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., dramatically)' },
+                { key: 'ADJECTIVE_3', label: 'Adjective (e.g., rude)' },
+                { key: 'COLOR_1', label: 'Color (e.g., orange)' },
+                { key: 'OBJECT_1', label: 'Object (e.g., napkin)' },
+            ],
+        },
+        // --- 9. Time Traveler's Mistake ---
+        {
+            title: "Time Traveler's Mistake",
+            theme: "Historical sci-fi, Steampunk aesthetic, sepia tones with flashes of neon",
+            template: "{NAME_1}, the accidental time traveler, set their dial to 1985 but landed in the year {YEAR_1} instead. ||| They immediately ran into a {ADJECTIVE_1} {CREATURE_1} and tried to {VERB_1} it with a {NOUN_1}. ||| The creature {VERB_PAST_TENSE_1} {ADVERB_1} at them and demanded a {FOOD_1}. ||| {NAME_1} managed to escape, leaving behind a small pile of {PLURAL_NOUN_1} as a peace offering.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Marty)' },
+                { key: 'YEAR_1', label: 'Year (e.g., 1492)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., confused)' },
+                { key: 'CREATURE_1', label: 'Creature (e.g., dinosaur)' },
+                { key: 'VERB_1', label: 'Verb (e.g., distract)' },
+                { key: 'NOUN_1', label: 'Object (e.g., banana peel)' },
+                { key: 'VERB_PAST_TENSE_1', label: 'Verb (Past Tense, e.g., hissed)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., loudly)' },
+                { key: 'FOOD_1', label: 'Food Item (e.g., broccoli)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., golf balls)' },
+            ],
+        },
+        // --- 10. The Haunted Library ---
+        {
+            title: "The Haunted Library",
+            theme: "Gothic mystery, dark shadows, stylized ink sketches, spooky comic style",
+            template: "On a {ADJECTIVE_1} night, {NAME_1} entered the abandoned library at the stroke of {TIME_1}. ||| They were searching for the infamous {NOUN_1} of the {ADJECTIVE_2} Librarian Ghost. ||| Suddenly, a shelf full of {PLURAL_NOUN_1} began to {VERB_1} {ADVERB_1} right in front of them. ||| {NAME_1} screamed a {SOUND_1} and fled the building, only to trip over a stray {OBJECT_1}.",
+            wordInputs: [
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., misty)' },
+                { key: 'NAME_1', label: 'Name (e.g., Sarah)' },
+                { key: 'TIME_1', label: 'Time (e.g., midnight)' },
+                { key: 'NOUN_1', label: 'Object (e.g., ancient cookbook)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., grumpy)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., dictionaries)' },
+                { key: 'VERB_1', label: 'Verb (e.g., sing)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., softly)' },
+                { key: 'SOUND_1', label: 'Sound (e.g., small squeak)' },
+                { key: 'OBJECT_1', label: 'Object (e.g., garden gnome)' },
+            ],
+        },
+        // --- 11. Summer Job Chaos ---
+        {
+            title: "Summer Job Chaos",
+            theme: "Slice of life comedy, bright colors, simple cartoon style, fast paced",
+            template: "{NAME_1} got a job at the {ADJECTIVE_1} fast-food restaurant, 'The {FOOD_1} Hut,' for the summer. ||| Their main task was to {VERB_1} {ADVERB_1} all the {PLURAL_NOUN_1} that the customers complained about. ||| One day, the manager, who always smelled like {SMELL_1}, asked {NAME_1} to {VERB_2} the giant {NOUN_1}. ||| {NAME_1} quit on the spot, realizing their true passion was {HOBBY_1} with their best friend, {FRIEND_NAME_1}.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Michael)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., stinky)' },
+                { key: 'FOOD_1', label: 'Food (e.g., Waffle)' },
+                { key: 'VERB_1', label: 'Verb (e.g., lick)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., quickly)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., socks)' },
+                { key: 'SMELL_1', label: 'Smell (e.g., wet dog)' },
+                { key: 'VERB_2', label: 'Verb (e.g., paint)' },
+                { key: 'NOUN_1', label: 'Object (e.g., trash can)' },
+                { key: 'HOBBY_1', label: 'Hobby (e.g., knitting)' },
+                { key: 'FRIEND_NAME_1', label: 'Friend Name (e.g., Kim)' },
+            ],
+        },
+        // --- 12. Medieval Dragon Taming ---
+        {
+            title: "Medieval Dragon Taming",
+            theme: "High fantasy, parchment texture, detailed pen and ink drawings, epic comic style",
+            template: "Sir {KNIGHT_NAME_1}, the most {ADJECTIVE_1} knight in the kingdom of {KINGDOM_1}, set out to find a dragon. ||| He found a young {COLOR_1} dragon trying to {VERB_1} its way out of a large pile of {PLURAL_NOUN_1}. ||| To tame the beast, the knight had to give it a belly rub and a large helping of {FOOD_1}, which the dragon ate {ADVERB_1}. ||| They returned to the castle as best friends, the dragon carrying a banner that read: '{CATCHPHRASE_1}!'",
+            wordInputs: [
+                { key: 'KNIGHT_NAME_1', label: 'Knight Name (e.g., Gawain)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., hairy)' },
+                { key: 'KINGDOM_1', label: 'Kingdom Name (e.g., Squee)' },
+                { key: 'COLOR_1', label: 'Color (e.g., purple)' },
+                { key: 'VERB_1', label: 'Verb (e.g., burrow)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., mattresses)' },
+                { key: 'FOOD_1', label: 'Food (e.g., spaghetti)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., delicately)' },
+                { key: 'CATCHPHRASE_1', label: 'Catchphrase (e.g., "YEET!")' }, // FIXED: Changed 'YEET!' to "YEET!"
+            ],
+        },
+        // --- 13. Secret Agent Mishap ---
+        {
+            title: "Secret Agent Mishap",
+            theme: "Spy thriller, geometric shapes, mid-century modern animation style, intense comic look",
+            template: "Agent {NUMBER_1}, codenamed '{ANIMAL_1}', infiltrated the headquarters of the {ADJECTIVE_1} villain, Dr. {VILLAIN_1}. ||| To bypass the security system, the agent had to {VERB_1} {ADVERB_1} across a floor covered in {PLURAL_NOUN_1}. ||| The villain was found trying to steal a rare {NOUN_1} and offered the agent a bribe of {NUMBER_2} {ITEM_1}. ||| Agent {NUMBER_1} declined, choosing instead to {VERB_2} the villain with a well-aimed {OBJECT_1}.",
+            wordInputs: [
+                { key: 'NUMBER_1', label: 'Agent Number (e.g., 99)' },
+                { key: 'ANIMAL_1', label: 'Animal (e.g., Wombat)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., slimy)' },
+                { key: 'VILLAIN_1', label: 'Villain Name (e.g., Chaos)' },
+                { key: 'VERB_1', label: 'Verb (e.g., crawl)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., slowly)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., bowling pins)' },
+                { key: 'NOUN_1', label: 'Object (e.g., giant pickle)' },
+                { key: 'NUMBER_2', label: 'Number (e.g., 500)' },
+                { key: 'ITEM_1', label: 'Item (e.g., rubber chicken)' },
+                { key: 'VERB_2', label: 'Verb (e.g., confuse)' },
+                { key: 'OBJECT_1', label: 'Small Object (e.g., eraser)' },
+            ],
+        },
+        // --- 14. Galactic Road Trip ---
+        {
+            title: "Galactic Road Trip",
+            theme: "Space opera comedy, brightly colored alien worlds, 80s cartoon aesthetic",
+            template: "The {ADJECTIVE_1} family piled into their spaceship, the {SHIP_NAME_1}, for a vacation on Planet {PLANET_1}. ||| Halfway there, their {NOUN_1} broke, forcing Dad to stop at a cosmic gas station run by {ADJECTIVE_2} aliens with {PLURAL_NOUN_1}. ||| They ate space food that tasted like {FOOD_1} and watched an alien dance {ADVERB_1}. ||| They finally arrived, ready to {VERB_1} and enjoy their {ADJECTIVE_3} holiday on the new world.",
+            wordInputs: [
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., messy)' },
+                { key: 'SHIP_NAME_1', label: 'Ship Name (e.g., Stardust)' },
+                { key: 'PLANET_1', label: 'Planet (e.g., Venus)' },
+                { key: 'NOUN_1', label: 'Part of Ship (e.g., antenna)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., shiny)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., earmuffs)' },
+                { key: 'FOOD_1', label: 'Food (e.g., cabbage)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., sluggishly)' },
+                { key: 'VERB_1', label: 'Verb (e.g., relax)' },
+                { key: 'ADJECTIVE_3', label: 'Adjective (e.g., fantastic)' },
+            ],
+        },
+        // --- 15. Baking Competition Fiasco ---
+        {
+            title: "Baking Competition Fiasco",
+            theme: "Food comedy, watercolor paintings, bright pastel colors, charming cartoon style",
+            template: "{NAME_1} was entering the annual {CITY_1} Baking Competition with their famous {FLAVOR_1} {DESSERT_1}. ||| The first challenge required them to {VERB_1} a giant {NOUN_1} while wearing a {ADJECTIVE_1} hat. ||| Disaster struck when their rival, {RIVAL_NAME_1}, accidentally dropped a sack of {PLURAL_NOUN_1} into the mixing bowl. ||| Despite the chaos, {NAME_1} won the grand prize: a year's supply of {FOOD_ITEM_1} and a kiss from a {ADJECTIVE_2} {ANIMAL_1}.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Penelope)' },
+                { key: 'CITY_1', label: 'City (e.g., Paris)' },
+                { key: 'FLAVOR_1', label: 'Flavor (e.g., garlic)' },
+                { key: 'DESSERT_1', label: 'Dessert (e.g., pie)' },
+                { key: 'VERB_1', label: 'Verb (e.g., balance)' },
+                { key: 'NOUN_1', label: 'Object (e.g., rolling pin)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., silky)' },
+                { key: 'RIVAL_NAME_1', label: 'Rival Name (e.g., Gordon)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., earthworms)' },
+                { key: 'FOOD_ITEM_1', label: 'Food Item (e.g., tofu)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., sweaty)' },
+                { key: 'ANIMAL_1', label: 'Animal (e.g., poodle)' },
+            ],
+        },
+        // --- 16. Robot Revolution ---
+        {
+            title: "Robot Revolution",
+            theme: "Dystopian Sci-Fi, detailed mechanical drawings, heavy metal comic style",
+            template: "The year is 2050, and the world is ruled by the {ADJECTIVE_1} robot overlord, Unit {NUMBER_1}. ||| Human rebel {NAME_1} was tasked with infiltrating the main factory where they were building {PLURAL_NOUN_1}. ||| They were caught by a patrolling {NOUN_1} that demanded they {VERB_1} {ADVERB_1}. ||| {NAME_1} managed to escape by throwing a {OBJECT_1} at the robot and riding a giant {ANIMAL_1} to freedom.",
+            wordInputs: [
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., angry)' },
+                { key: 'NUMBER_1', label: 'Number (e.g., 734)' },
+                { key: 'NAME_1', label: 'Name (e.g., Neo)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., spoons)' },
+                { key: 'NOUN_1', label: 'Robot Type (e.g., Drone)' },
+                { key: 'VERB_1', label: 'Verb (e.g., juggle)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., silently)' },
+                { key: 'OBJECT_1', label: 'Object (e.g., old shoe)' },
+                { key: 'ANIMAL_1', label: 'Animal (e.g., giraffe)' },
+            ],
+        },
+        // --- 17. Wild West Showdown ---
+        {
+            title: "Wild West Showdown",
+            theme: "Western, dusty landscape, traditional comic book hatching and cross-hatching",
+            template: "Sheriff {NAME_1}, known for his {ADJECTIVE_1} boots, rode into the dusty town of {TOWN_1} on his faithful {ANIMAL_1}. ||| He was there to confront the notorious outlaw, {OUTLAW_1}, who had just stolen a sack of {PLURAL_NOUN_1}. ||| The outlaw threatened to {VERB_1} the Sheriff with a giant {NOUN_1} he pulled from his hat. ||| But the Sheriff was too fast; he {VERB_PAST_TENSE_1} {ADVERB_1} and forced the outlaw to apologize for being so {ADJECTIVE_2}.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Clint)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., sparkly)' },
+                { key: 'TOWN_1', label: 'Town Name (e.g., Dusty Gulch)' },
+                { key: 'ANIMAL_1', label: 'Animal (e.g., donkey)' },
+                { key: 'OUTLAW_1', label: 'Outlaw Name (e.g., Pegleg Pete)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., bananas)' },
+                { key: 'VERB_1', label: 'Verb (e.g., tickle)' },
+                { key: 'NOUN_1', label: 'Object (e.g., tuba)' },
+                { key: 'VERB_PAST_TENSE_1', label: 'Verb (Past Tense, e.g., laughed)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., nervously)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., loud)' },
+            ],
+        },
+        // --- 18. Olympic Training Fail ---
+        {
+            title: "Olympic Training Fail",
+            theme: "Sports comedy, dynamic action lines, colorful cartoon style, gymnasium setting",
+            template: "Olympic hopeful {NAME_1} trained {ADVERB_1} every day for the {SPORT_1} event, dreaming of a gold {METAL_1}. ||| During a practice session, their coach, who wore a {COLOR_1} {OBJECT_1}, told them to jump over a stack of {NUMBER_1} {PLURAL_NOUN_1}. ||| {NAME_1} tripped over their own {BODY_PART_1} and ended up landing in a giant tub of {LIQUID_1}. ||| Despite the {ADJECTIVE_1} injury, they were determined to {VERB_1} their way to victory in the next competition.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Shelly)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., gently)' },
+                { key: 'SPORT_1', label: 'Sport (e.g., curling)' },
+                { key: 'METAL_1', label: 'Metal (e.g., bronze)' },
+                { key: 'COLOR_1', label: 'Color (e.g., rainbow)' },
+                { key: 'OBJECT_1', label: 'Object (e.g., megaphone)' },
+                { key: 'NUMBER_1', label: 'Number (e.g., 100)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., mattresses)' },
+                { key: 'BODY_PART_1', label: 'Body Part (e.g., elbow)' },
+                { key: 'LIQUID_1', label: 'Liquid (e.g., soda)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., minor)' },
+                { key: 'VERB_1', label: 'Verb (e.g., skip)' },
+            ],
+        },
+        // --- 19. Lost in the Museum ---
+        {
+            title: "Lost in the Museum",
+            theme: "Mystery adventure, muted tones, detailed sketches of ancient artifacts",
+            template: "{NAME_1} wandered off from the school field trip and became lost inside the {ADJECTIVE_1} Museum of {TOPIC_1}. ||| They soon discovered that the giant {STATUE_1} of {PERSON_1} was actually a secret door that only opens if you {VERB_1}. ||| Inside the secret passage, they found a room filled with {PLURAL_NOUN_1} guarded by a sleeping {ANIMAL_1}. ||| {NAME_1} quickly took a single {NOUN_1} and escaped {ADVERB_1} before the field trip bus left without them.",
+            wordInputs: [
+                { key: 'NAME_1', label: 'Name (e.g., Alex)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., gigantic)' },
+                { key: 'TOPIC_1', label: 'Topic (e.g., Toenails)' },
+                { key: 'STATUE_1', label: 'Statue (e.g., Horse)' },
+                { key: 'PERSON_1', label: 'Person (e.g., Cleopatra)' },
+                { key: 'VERB_1', label: 'Verb (e.g., whistle)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., bouncy balls)' },
+                { key: 'ANIMAL_1', label: 'Animal (e.g., raccoon)' },
+                { key: 'NOUN_1', label: 'Object (e.g., diamond earring)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., clumsily)' },
+            ],
+        },
+        // --- 20. Pop Star Concert Crash ---
+        {
+            title: "Pop Star Concert Crash",
+            theme: "Modern celebrity, blinding neon colors, exaggerated dynamic poses, pop-art comic style",
+            template: "Mega Pop Star, {STAR_NAME_1}, was about to perform their new hit single, '{SONG_TITLE_1}', to a crowd of {NUMBER_1} screaming fans. ||| Suddenly, their tour bus, driven by their {ADJECTIVE_1} manager, crashed right through the back of the stage, knocking over a giant {NOUN_1}. ||| {STAR_NAME_1} grabbed a microphone and started to {VERB_1} the crowd, demanding they all wear {PLURAL_NOUN_1}. ||| The star ended the concert by {VERB_ENDING_ING_1} into the sky on a giant {OBJECT_1}.",
+            wordInputs: [
+                { key: 'STAR_NAME_1', label: 'Pop Star Name (e.g., Glitter)' },
+                { key: 'SONG_TITLE_1', label: 'Song Title (e.g., Sparkle)' },
+                { key: 'NUMBER_1', label: 'Large Number (e.g., 100000)' },
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., angry)' },
+                { key: 'NOUN_1', label: 'Stage Prop (e.g., disco ball)' },
+                { key: 'VERB_1', label: 'Verb (e.g., scold)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., tiny hats)' },
+                { key: 'VERB_ENDING_ING_1', label: 'Verb Ending in -ing (e.g., flying)' },
+                { key: 'OBJECT_1', label: 'Object (e.g., slice of toast)' },
+            ],
+        },
+        // --- 21. Medieval Festival Mayhem ---
+        {
+            title: "Medieval Festival Mayhem",
+            theme: "Rennaissance faire, humorous, detailed pen and ink drawings with exaggerated faces",
+            template: "At the {ADJECTIVE_1} Medieval Festival, {NAME_1} was challenged to a duel by a knight wearing armor made of {MATERIAL_1}. ||| The duel required both contestants to {VERB_1} {ADVERB_1} while juggling {NUMBER_1} {PLURAL_NOUN_1}. ||| The entire crowd started chanting the phrase '{CATCHPHRASE_1}' as the knight slipped on a dropped {FOOD_1}. ||| {NAME_1} was declared the winner and received a majestic {NOUN_1} as their grand prize, which they carried home on a {ADJECTIVE_2} {ANIMAL_1}.",
+            wordInputs: [
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., cheerful)' },
+                { key: 'NAME_1', label: 'Name (e.g., Arthur)' },
+                { key: 'MATERIAL_1', label: 'Material (e.g., spaghetti)' },
+                { key: 'VERB_1', label: 'Verb (e.g., spin)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., loudly)' },
+                { key: 'NUMBER_1', label: 'Number (e.g., 5)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., turnips)' },
+                { key: 'CATCHPHRASE_1', label: 'Catchphrase (e.g., "To the moon!")' },
+                { key: 'FOOD_1', label: 'Food Item (e.g., pickle)' },
+                { key: 'NOUN_1', label: 'Object (e.g., rubber duck)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., purple)' },
+                { key: 'ANIMAL_1', label: 'Animal (e.g., moose)' },
+            ],
+        },
+        // --- 22. Backyard BBQ Catastrophe ---
+        {
+            title: "Backyard BBQ Catastrophe",
+            theme: "Domestic comedy, bright, flat colors, modern cartoon style, summer setting",
+            template: "Mom and Dad hosted a {ADJECTIVE_1} barbecue in the backyard of {CITY_1}. ||| The grill was hot and sizzling with {PLURAL_NOUN_1} when the family dog, {DOG_NAME_1}, decided to {VERB_1} the table. ||| Aunt {AUNT_NAME_1}, who always wears {COLOR_1} {CLOTHING_1}, screamed a {SOUND_1} and dropped her giant {NOUN_1}. ||| The day was saved when neighbor {NAME_1} showed up {ADVERB_1} with a tray of perfectly cooked {FOOD_1}.",
+            wordInputs: [
+                { key: 'ADJECTIVE_1', label: 'Adjective (e.g., chaotic)' },
+                { key: 'CITY_1', label: 'City (e.g., Omaha)' },
+                { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., pencils)' },
+                { key: 'DOG_NAME_1', label: 'Dog Name (e.g., Sparky)' },
+                { key: 'VERB_1', label: 'Verb (e.g., lick)' },
+                { key: 'AUNT_NAME_1', label: 'Aunt Name (e.g., Sue)' },
+                { key: 'COLOR_1', label: 'Color (e.g., plaid)' },
+                { key: 'CLOTHING_1', label: 'Clothing Item (e.g., sandals)' },
+                { key: 'SOUND_1', label: 'Sound (e.g., little yelp)' },
+                { key: 'NOUN_1', label: 'Object (e.g., watermelon)' },
+                { key: 'NAME_1', label: 'Name (e.g., Gary)' },
+                { key: 'ADVERB_1', label: 'Adverb (e.g., elegantly)' },
+                { key: 'FOOD_1', label: 'Food Item (e.g., cookies)' },
+            ],
+        },
+    ];
+    let currentStoryConfig = null;
+
+    /**
+     * Sets a random story configuration on initialization or restart.
+     */
+    function setRandomStoryConfig() {
+        const randomIndex = Math.floor(Math.random() * storyConfigurations.length);
+        currentStoryConfig = storyConfigurations[randomIndex];
+    }
+
+    // --- API & Utility Functions ---
+
+    async function retryFetchWithBackoff(url, options, maxRetries = 5) {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response;
+            } catch (error) {
+                if (i === maxRetries - 1) throw error;
+                const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    function generateImagePrompt(segmentText) {
+        // Appending the doodle style to the existing theme for a themed doodle look
+        const doodleStyle = ", drawn doodle on school notebook paper, using only black and red pen and pencil sketches, high school art class style. Simple, messy, quickly drawn.";
+        const theme = currentStoryConfig.theme + doodleStyle;
+        const cleanText = segmentText.replace(/<[^>]*>?/gm, '').trim();
+        return `${theme}. Illustrate the scene: "${cleanText}".`;
+    }
+
+    async function generateComicCell(prompt) {
+        const apiKey = "";
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+
+        const payload = { 
+            instances: { 
+                prompt: prompt 
+            }, 
+            parameters: { 
+                "sampleCount": 1,
+                "outputMimeType": "image/png",
+                "aspectRatio": "1:1" // Square panel for grid
+            } 
+        };
+
+        const options = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        };
+
+        const response = await retryFetchWithBackoff(apiUrl, options);
+        const result = await response.json();
+
+        if (result.predictions && result.predictions.length > 0 && result.predictions[0].bytesBase64Encoded) {
+            return `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+        } else {
+            throw new Error("Image generation failed or returned no data.");
+        }
+    }
+    
+    async function generateAllImages(storySegments) {
+        state.isGenerating = true;
+        state.currentPage = 'loading';
+        render();
+
+        const newSegments = [...storySegments];
+
+        for (let i = 0; i < newSegments.length; i++) {
+            const segment = newSegments[i];
+            const prompt = generateImagePrompt(segment.text);
+            
+            newSegments[i].status = 'generating';
+            state.storySegments = newSegments;
+            render();
+
+            try {
+                const imageUrl = await generateComicCell(prompt);
+                newSegments[i].imageUrl = imageUrl;
+                newSegments[i].status = 'complete';
+            } catch (error) {
+                console.error(`Error generating image for segment ${i}:`, error);
+                newSegments[i].imageUrl = 'https://placehold.co/400x400/DC2626/FFFFFF?text=IMAGE+FAILED';
+                newSegments[i].status = 'error';
+                showMessage(`Image generation failed for panel ${i+1}.`, 'error');
+            }
+            
+            state.storySegments = newSegments;
+            render();
+        }
+
+        state.isGenerating = false;
+        state.currentPage = 'story';
+        render();
+    }
+
+
+    // --- Core Logic ---
+
+    async function generateStory() {
+        if (!currentStoryConfig || !currentStoryConfig.template) {
+            showMessage("Error: No story template loaded. Please restart.", 'error');
+            return;
+        }
+
+        let fullStory = currentStoryConfig.template;
+        let isComplete = true;
+
+        currentStoryConfig.wordInputs.forEach(input => {
+            const userWord = state.userWords[input.key] || '';
+            
+            if (userWord.trim() === '') {
+                isComplete = false;
+            }
+            
+            const replacement = `<span class="font-extrabold text-purple-700">${userWord}</span>`;
+            fullStory = fullStory.replace(`{${input.key}}`, replacement);
+        });
+
+        if (isComplete) {
+            // Story is segmented by ||| for each of the four comic panels
+            const segments = fullStory.split('|||').filter(s => s.trim() !== '').map(text => ({
+                text: text.trim(),
+                imageUrl: null,
+                status: 'pending' 
+            }));
+
+            if (segments.length === 0) {
+                 showMessage("Error: Story template is empty or misconfigured.", 'error');
+                 return;
+            }
+             if (segments.length !== 4) {
+                 showMessage(`Warning: Story has ${segments.length} segments, expecting 4 for best comic layout.`, 'info');
+            }
+
+            state.storySegments = segments;
+            
+            await generateAllImages(state.storySegments);
+            
+        } else {
+            showMessage("Please fill in all the blanks to complete the story!", 'error');
+        }
+    }
+
+    function handleInputChange(key, value) {
+        state.userWords[key] = value;
+    }
+
+    function restartGame() {
+        state.userWords = {};
+        state.storySegments = [];
+        setRandomStoryConfig(); // Pick a new random theme.
+        state.currentPage = 'input';
+        render();
+        showMessage("A new comic theme has been selected!", 'info');
+    }
+
+    // --- UI Components ---
+
+    function showMessage(message, type = 'info') {
+        const messageBox = document.createElement('div');
+        const color = type === 'error' ? 'bg-red-500' : 'bg-green-500';
+        
+        messageBox.className = `fixed top-5 left-1/2 -translate-x-1/2 p-3 px-6 text-sm font-semibold text-white rounded-full transition-all duration-300 transform shadow-lg ${color} z-50`;
+        messageBox.textContent = message;
+        
+        appElement.appendChild(messageBox);
+
+        setTimeout(() => {
+            messageBox.classList.add('opacity-0', 'translate-y-[-20px]');
+            messageBox.addEventListener('transitionend', () => messageBox.remove());
+        }, 3000);
+    }
+
+    /**
+     * Renders the Input Form screen.
+     */
+    function renderInputScreen() {
+        if (!currentStoryConfig) return '<div>Loading...</div>';
+
+        const inputFields = currentStoryConfig.wordInputs.map(input => `
+            <div class="mb-4">
+                <label for="${input.key}" class="block text-base font-medium text-gray-700 mb-1">${input.label}</label>
+                <input 
+                    type="text" 
+                    id="${input.key}" 
+                    value="${state.userWords[input.key] || ''}"
+                    oninput="handleInputChange('${input.key}', this.value)"
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none transition duration-150 ease-in-out text-gray-800"
+                    placeholder="Enter your ${input.label.toLowerCase().split('(')[0].trim()}"
+                >
+            </div>
+        `).join('');
+
+
+        return `
+            <header class="p-5 bg-red-500 text-white shadow-md rounded-t-xl flex justify-center items-center">
+                <h1 class="text-2xl font-bold">✍️ My Comic Idea Notebook</h1>
+            </header>
+            
+            <div class="p-6 flex-grow scroll-area overflow-y-auto notepad-paper">
+                <div class="text-center mb-6 p-4 bg-yellow-100/50 rounded-xl border-2 border-yellow-300/80">
+                    <p class="text-base font-semibold text-gray-700 mb-1">Current Story Theme:</p>
+                    <h2 class="text-2xl font-extrabold text-purple-800">${currentStoryConfig.title}</h2>
+                </div>
+                
+                <p class="mb-6 text-gray-600 text-center text-lg">Help me finish my assignment! Fill in the blanks:</p>
+                <div id="input-form">
+                    ${inputFields}
+                </div>
+
+                <div class="mt-8">
+                    <button 
+                        onclick="restartGame()"
+                        class="w-full bg-blue-500 hover:bg-blue-700 text-white font-semibold py-2 app-button transition duration-200"
+                    >
+                        Randomly Generate New Theme
+                    </button>
+                </div>
+            </div>
+            
+            <footer class="p-4 bg-white border-t border-gray-100 sticky bottom-0">
+                <button 
+                    onclick="generateStory()"
+                    class="w-full bg-purple-500 hover:bg-purple-700 text-white font-semibold py-3 app-button transition duration-200"
+                >
+                    Create Comic
+                </button>
+            </footer>
+        `;
+    }
+    
+    /**
+     * Renders the Loading screen while images are being generated.
+     */
+    function renderLoadingScreen() {
+        const panels = state.storySegments.map((segment, index) => {
+            let statusText = 'Pending...';
+            let spinner = '';
+            let ringColor = 'border-gray-300';
+            let bgColor = 'bg-white';
+
+            if (segment.status === 'generating') {
+                statusText = `Doodling Panel ${index + 1}...`;
+                ringColor = 'border-purple-500';
+                bgColor = 'bg-purple-50';
+                spinner = `<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-700"></div>`;
+            } else if (segment.status === 'complete') {
+                statusText = `Panel ${index + 1} Doodled!`;
+                ringColor = 'border-green-500';
+                bgColor = 'bg-green-50';
+            } else if (segment.status === 'error') {
+                 statusText = `Panel ${index + 1} Failed!`;
+                ringColor = 'border-red-500';
+                bgColor = 'bg-red-50';
+            }
+
+            return `
+                <div class="p-4 ${bgColor} rounded-xl shadow flex items-center mb-3">
+                    <div class="w-10 h-10 flex items-center justify-center rounded-full border-4 ${ringColor} ${segment.status === 'generating' ? 'animate-pulse' : ''} mr-4">
+                        ${spinner}
+                    </div>
+                    <p class="text-base font-medium text-gray-700">${statusText}</p>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <header class="p-5 bg-red-500 text-white shadow-md rounded-t-xl">
+                <h1 class="text-2xl font-bold text-center">🎨 Drawing Your Doodles!</h1>
+            </header>
+            
+            <div class="p-6 flex-grow scroll-area overflow-y-auto notepad-paper">
+                <p class="mb-6 text-gray-600 text-center font-semibold text-lg">
+                    I'm drawing your scenes now. Be patient, it's art!
+                </p>
+                <div class="w-full text-center mb-6">
+                    <svg class="animate-bounce mx-auto h-12 w-12 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                ${panels}
+            </div>
+            
+            <footer class="p-4 bg-white border-t border-gray-100 sticky bottom-0">
+                <button 
+                    class="w-full bg-gray-400 text-white font-semibold py-3 app-button cursor-not-allowed" disabled
+                >
+                    Generating...
+                </button>
+            </footer>
+        `;
+    }
+
+    /**
+     * Renders the Story Result screen with comic panels in a 1x4 vertical stack.
+     */
+    function renderStoryScreen() {
+        const comicPanels = state.storySegments.map((segment, index) => {
+            const imageUrl = segment.imageUrl || 'https://placehold.co/400x400/9333ea/FFFFFF?text=Panel+Error';
+            
+            return `
+                <div class="bg-white rounded-xl shadow-2xl overflow-hidden border-4 border-purple-900 comic-panel">
+                    <!-- Comic Panel Image (Larger) -->
+                    <div class="w-full aspect-square bg-gray-200 flex items-center justify-center">
+                        <img 
+                            src="${imageUrl}" 
+                            alt="Comic panel illustration of story segment ${index + 1}" 
+                            class="w-full h-full object-cover transition duration-300"
+                            onerror="this.onerror=null; this.src='https://placehold.co/400x400/9333ea/FFFFFF?text=Generation+Error'"
+                        >
+                    </div>
+                    <!-- Panel Text/Caption (BELOW the image) -->
+                    <div class="caption-block">
+                        <p class="font-bold text-lg mb-1 text-purple-800">Panel ${index + 1}</p>
+                        <p class="font-medium text-xl leading-snug italic">${segment.text}</p>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <header class="p-5 bg-red-500 text-white shadow-md rounded-t-xl">
+                <h1 class="text-2xl font-bold text-center">🖼️ ${currentStoryConfig.title} Comic!</h1>
+            </header>
+            
+            <div class="p-4 flex-grow scroll-area overflow-y-auto notepad-paper">
+                <p class="mb-4 text-gray-600 text-center font-medium text-lg">
+                    Check out my comic page! It's so funny!
+                </p>
+                <!-- 1x4 Vertical Stack Layout for the Comic Page -->
+                <div id="comic-book-container" class="flex flex-col">
+                    ${comicPanels}
+                </div>
+            </div>
+            
+            <footer class="p-4 bg-white border-t border-gray-100 sticky bottom-0">
+                <button 
+                    onclick="restartGame()"
+                    class="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-3 app-button transition duration-200"
+                >
+                    Start a New Comic!
+                </button>
+            </footer>
+        `;
+    }
+
+    /**
+     * Main render function to display the current application page.
+     */
+    function render() {
+        appElement.innerHTML = ''; // Clear existing content
+
+        let content;
+        if (state.currentPage === 'input') {
+            content = renderInputScreen();
+        } else if (state.currentPage === 'loading') {
+            content = renderLoadingScreen();
+        } else if (state.currentPage === 'story') {
+            content = renderStoryScreen();
+        }
+
+        appElement.innerHTML = content;
+    }
+
+    // --- Initialization ---
+    window.handleInputChange = handleInputChange;
+    window.generateStory = generateStory;
+    window.restartGame = restartGame;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        if (typeof initializeAuth === 'function') {
+            await initializeAuth();
+        }
+        // Select the initial random story configuration.
+        setRandomStoryConfig(); 
+        render();
+        showMessage("Welcome! Choose your words and create a comic.", 'info');
+    });
+
+</script>
+
+</body>
+</html>
