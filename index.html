@@ -59,6 +59,14 @@
             background-color: rgba(255, 255, 255, 0.8) !important;
             font-weight: 400 !important; /* Slightly lighter input text */
         }
+
+        /* Styling for the API Key Input to make it stand out (Kept for styling overrides) */
+        .api-key-input {
+            border: 2px solid #ef4444 !important; /* Red border for emphasis */
+            color: #ef4444 !important;
+            background-color: #fef2f2 !important; /* Light red background */
+            font-size: 0.875rem;
+        }
         
         /* Button styling for a doodled/drawn look */
         .app-button {
@@ -155,6 +163,7 @@
         userWords: {},
         storySegments: [], // [{text: '...', imageUrl: null, status: 'pending'}]
         isGenerating: false,
+        // API key state removed to rely on environment
     };
 
     // --- Dynamic Mad Libs Data (20 THEMES) ---
@@ -327,7 +336,7 @@
         {
             title: "Time Traveler's Mistake",
             theme: "Historical sci-fi, Steampunk aesthetic, sepia tones with flashes of neon",
-            template: "{NAME_1}, the accidental time traveler, set their dial to 1985 but landed in the year {YEAR_1} instead. ||| They immediately ran into a {ADJECTIVE_1} {CREATURE_1} and tried to {VERB_1} it with a {NOUN_1}. ||| The creature {VERB_PAST_TENSE_1} {ADVERB_1} at them and demanded a {FOOD_1}. ||| {NAME_1} managed to escape, leaving behind a small pile of {PLURAL_NOUN_1} as a peace offering.",
+            template: "The {ADJECTIVE_1} time traveler, {NAME_1}, set their dial to 1985 but landed in the year {YEAR_1} instead. ||| They immediately ran into a {ADJECTIVE_2} {CREATURE_1} and tried to {VERB_1} it with a {NOUN_1}. ||| The creature {VERB_PAST_TENSE_1} {ADVERB_1} at them and demanded a {FOOD_1}. ||| {NAME_1} managed to escape, leaving behind a small pile of {PLURAL_NOUN_1} as a peace offering.",
             wordInputs: [
                 { key: 'NAME_1', label: 'Name (e.g., Marty)' },
                 { key: 'YEAR_1', label: 'Year (e.g., 1492)' },
@@ -339,6 +348,7 @@
                 { key: 'ADVERB_1', label: 'Adverb (e.g., loudly)' },
                 { key: 'FOOD_1', label: 'Food Item (e.g., broccoli)' },
                 { key: 'PLURAL_NOUN_1', label: 'Plural Noun (e.g., golf balls)' },
+                { key: 'ADJECTIVE_2', label: 'Adjective (e.g., grumpy)' },
             ],
         },
         // --- 10. The Haunted Library ---
@@ -623,7 +633,9 @@
     }
 
     async function generateComicCell(prompt) {
-        const apiKey = "";
+        // Use an empty API key string. The Canvas environment will securely inject the real key during the fetch call.
+        const apiKey = ""; 
+        
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
 
         const payload = { 
@@ -649,6 +661,8 @@
         if (result.predictions && result.predictions.length > 0 && result.predictions[0].bytesBase64Encoded) {
             return `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
         } else {
+            // Log full error response for debugging if needed
+            console.error("Image generation failed:", result); 
             throw new Error("Image generation failed or returned no data.");
         }
     }
@@ -692,6 +706,8 @@
     // --- Core Logic ---
 
     async function generateStory() {
+        // Removed API key check: the environment handles authentication now.
+
         if (!currentStoryConfig || !currentStoryConfig.template) {
             showMessage("Error: No story template loaded. Please restart.", 'error');
             return;
@@ -792,7 +808,9 @@
                 <h1 class="text-2xl font-bold">✍️ My Comic Idea Notebook</h1>
             </header>
             
-            <div class="p-6 flex-grow scroll-area overflow-y-auto notepad-paper">
+            <!-- Removed API Key Input Section -->
+
+            <div class="p-6 pt-2 flex-grow scroll-area overflow-y-auto notepad-paper">
                 <div class="text-center mb-6 p-4 bg-yellow-100/50 rounded-xl border-2 border-yellow-300/80">
                     <p class="text-base font-semibold text-gray-700 mb-1">Current Story Theme:</p>
                     <h2 class="text-2xl font-extrabold text-purple-800">${currentStoryConfig.title}</h2>
@@ -961,6 +979,7 @@
     window.handleInputChange = handleInputChange;
     window.generateStory = generateStory;
     window.restartGame = restartGame;
+    // Removed window.handleApiKeyChange
 
     document.addEventListener('DOMContentLoaded', async () => {
         if (typeof initializeAuth === 'function') {
